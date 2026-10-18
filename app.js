@@ -1,7 +1,9 @@
 'use strict';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const COLORS = ['#ff5c7a', '#ffb547', '#ffe066', '#7ee787', '#4fc3f7', '#4f8cff', '#b48cff', '#ff8cd9', '#9aa1ad'];
+// All 9 reach >= 6.5:1 contrast with black text (checked with WCAG relative luminance).
+const COLORS = ['#ff5c7a', '#ffb547', '#ffe066', '#7ee787', '#4fc3f7', '#6b9bff', '#c4a3ff', '#ff8cd9', '#b4bac4'];
+const OLD_COLORS = { '#4f8cff': '#6b9bff', '#b48cff': '#c4a3ff', '#9aa1ad': '#b4bac4' };
 const WIDE = matchMedia('(min-width:1100px) and (orientation:landscape)');
 
 /* ---------- IndexedDB ---------- */
@@ -157,7 +159,7 @@ function getThumb(id) {
 }
 async function fullURL(id) { const b = await getBlobs(id); return b ? URL.createObjectURL(b.full) : ''; }
 function sortedTags() { return [...S.tags].sort((a, b) => (b.pinned - a.pinned) || a.name.localeCompare(b.name)); }
-const chipHTML = (t, cls = '') => `<span class="chip ${cls}" data-tag="${t.id}"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`;
+const chipHTML = (t, cls = '') => `<span class="chip filled ${cls}" style="--c:${t.color}" data-tag="${t.id}"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`;
 
 
 /* ---------- smart tag suggestions (on-device keyword rules) ---------- */
@@ -255,7 +257,7 @@ function homeHTML() {
     return `<button class="tile${extra}" data-filter="${filter}" style="--c:${color}">${l ? `<img data-id="${l.id}" alt="">` : '<div class="noimg"></div>'}<div class="tl"><span class="dot"></span><span class="tn">${label}</span><span class="tc">${n}</span></div></button>`; };
   const sc = sugCount();
   return `<div class="homeh"><h2>Tags</h2>${sc ? `<button class="btn sugbtn" data-act="review">✨ Review ${sc} suggestion${sc === 1 ? '' : 's'}</button>` : ''}</div><div class="tiles">` +
-    tile('', 'All screenshots', '#e9ebef', () => true) + tile('__pinned', '📌 Pinned', '#ffd479', s => s.pinned) + tile('__untagged', 'Untagged', '#6b7280', s => !s.tags.length) +
+    tile('', 'All screenshots', '#ffffff', () => true) + tile('__pinned', '📌 Pinned', '#e3e5e9', s => s.pinned) + tile('__untagged', 'Untagged', '#c9cdd4', s => !s.tags.length) +
     sortedTags().map(t => tile(t.id, (t.pinned ? '📌 ' : '') + esc(t.name), t.color, s => s.tags.includes(t.id))).join('') +
     `<button class="tile newtile" data-act="newtag"><div class="noimg">＋</div><div class="tl"><span class="tn">New tag</span></div></button></div>`;
 }
@@ -288,7 +290,7 @@ function renderFeed() {
 }
 function renderSidebar() {
   const count = id => S.shots.filter(s => s.tags.includes(id)).length;
-  const row = (id, label, n, color) => `<button class="srow${S.filter === id ? ' on' : ''}" data-filter="${id ?? ''}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}<span>${label}</span><span class="n">${n}</span></button>`;
+  const row = (id, label, n, color) => `<button class="srow${color ? ' filled' : ''}${S.filter === id ? ' on' : ''}" ${color ? `style="--c:${color}"` : ''} data-filter="${id ?? ''}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}<span>${label}</span><span class="n">${n}</span></button>`;
   $('#sidebar').innerHTML = row(null, '🖼️ All screenshots', S.shots.length) +
     row('__pinned', '📌 Pinned', S.shots.filter(s => s.pinned).length) +
     row('__untagged', '◌ Untagged', S.shots.filter(s => !s.tags.length).length) +
@@ -475,6 +477,7 @@ async function importBackup(f) {
     const data = JSON.parse(await zip.file('snapfeed.json').async('string'));
     const tagMap = {};
     for (const tg of data.tags || []) {
+      if (OLD_COLORS[tg.color]) tg.color = OLD_COLORS[tg.color];
       const ex = S.tags.find(x => x.id === tg.id || x.name.toLowerCase() === tg.name.toLowerCase());
       if (ex) tagMap[tg.id] = ex.id; else { S.tags.push(tg); await put('tags', tg); tagMap[tg.id] = tg.id; }
     }
@@ -580,6 +583,7 @@ let rz, lastCols; addEventListener('resize', () => { clearTimeout(rz); rz = setT
 /* ---------- boot ---------- */
 (async function boot() {
   [S.shots, S.tags] = await Promise.all([getAll('shots'), getAll('tags')]);
+  for (const t of S.tags) if (OLD_COLORS[t.color]) { t.color = OLD_COLORS[t.color]; put('tags', t); }
   suggestAll();
   lastCols = ncols() + '' + WIDE.matches;
   render();
@@ -591,38 +595,48 @@ window.__sf = { S, importFiles, render, importBackup, exportBackup };
 
 /* ---------- gestures: swipe down / left-edge swipe to dismiss ---------- */
 function dragDismiss(handle, { axis, target, fade, onClose, canStart = () => true }) {
+  // Touch events are the primary path (iOS Safari/standalone hands pointer streams to native
+  // scrolling and fires pointercancel); pointer events remain only for mouse/pen.
   let st = null;
-  handle.addEventListener('pointerdown', e => {
-    if (e.button > 0 || !canStart(e)) return;
-    st = { x: e.clientX, y: e.clientY, t: performance.now(), mode: axis === 'x' ? 'go' : null, d: 0, id: e.pointerId };
-    if (axis === 'x') { try { handle.setPointerCapture(e.pointerId); } catch {} target().style.transition = 'none'; }
-  });
-  handle.addEventListener('pointermove', e => {
-    if (!st || e.pointerId !== st.id) return;
-    const dx = e.clientX - st.x, dy = e.clientY - st.y;
+  const begin = (x, y, e) => {
+    if (!canStart(e)) return;
+    st = { x, y, t: performance.now(), mode: axis === 'x' ? 'go' : null, d: 0 };
+    if (axis === 'x') target().style.transition = 'none';
+  };
+  const move = (x, y, e) => {
+    if (!st) return;
+    const dx = x - st.x, dy = y - st.y;
     if (!st.mode) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      if (dy > 0 && dy > Math.abs(dx) * 1.2) { st.mode = 'go'; try { handle.setPointerCapture(e.pointerId); } catch {} target().style.transition = 'none'; }
-      else { st = null; return; }   // horizontal or upward: leave it to the item swiper / scrolling
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { if (dy > 0 && dy >= Math.abs(dx) && e.cancelable) e.preventDefault(); return; }
+      if (dy > 0 && dy > Math.abs(dx)) { st.mode = 'go'; target().style.transition = 'none'; if (pid != null) try { handle.setPointerCapture(pid); } catch {} }
+      else { st = null; return; }   // horizontal/upward: leave it to the pager or scrolling
     }
+    if (e.cancelable) e.preventDefault();
     st.d = Math.max(0, axis === 'x' ? dx : dy);
     target().style.transform = axis === 'x' ? `translateX(${st.d}px)` : `translateY(${st.d}px) scale(${1 - Math.min(st.d, 400) / 2400})`;
-    if (fade) fade().style.backgroundColor = `rgba(0,0,0,${Math.max(0, 1 - st.d / 400) * (fade().dataset.a || 1)})`;
-    e.preventDefault();
-  }, { passive: false });
-  const end = e => {
-    if (!st || e.pointerId !== st.id) return;
+    if (fade) fade().style.backgroundColor = `rgba(0,0,0,${Math.max(0, 1 - st.d / 400)})`;
+  };
+  const finish = cancelled => {
+    if (!st) return;
     const s = st; st = null; if (s.mode !== 'go') return;
     const v = s.d / Math.max(1, performance.now() - s.t), el = target();
     el.style.transition = 'transform .18s ease-out';
-    if (s.d > 110 || (v > 0.6 && s.d > 30)) {
+    if (!cancelled && (s.d > 110 || (v > 0.6 && s.d > 30))) {
       el.style.transform = axis === 'x' ? 'translateX(100vw)' : 'translateY(100vh)';
       setTimeout(onClose, 170);
-    } else {
-      el.style.transform = ''; if (fade) fade().style.backgroundColor = '';
-    }
+    } else { el.style.transform = ''; if (fade) fade().style.backgroundColor = ''; }
   };
-  handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+  let tid = null;
+  handle.addEventListener('touchstart', e => { if (e.touches.length !== 1) { st = null; return; } const t = e.touches[0]; tid = t.identifier; begin(t.clientX, t.clientY, e); }, { passive: true });
+  handle.addEventListener('touchmove', e => { if (!st) return; if (e.touches.length !== 1) { finish(true); return; } const t = [...e.touches].find(t => t.identifier === tid) || e.touches[0]; move(t.clientX, t.clientY, e); }, { passive: false });
+  handle.addEventListener('touchend', () => finish(false));
+  // touchcancel (e.g. iOS took the gesture): commit if we were already clearly past the threshold, else snap back
+  handle.addEventListener('touchcancel', () => { if (st && st.mode === 'go' && st.d > 110) finish(false); else finish(true); });
+  let pid = null;
+  handle.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' || e.button > 0) return; pid = e.pointerId; begin(e.clientX, e.clientY, e); if (st && axis === 'x') try { handle.setPointerCapture(pid); } catch {} });
+  handle.addEventListener('pointermove', e => { if (e.pointerType !== 'touch' && e.pointerId === pid) move(e.clientX, e.clientY, e); });
+  handle.addEventListener('pointerup', e => { if (e.pointerType !== 'touch' && e.pointerId === pid) { pid = null; finish(false); } });
+  handle.addEventListener('pointercancel', e => { if (e.pointerType !== 'touch' && e.pointerId === pid) { pid = null; finish(true); } });
 }
 // Viewer: vertical drag on the image track (horizontal stays the item swiper), and a left-edge strip.
 dragDismiss($('#vTrack'), { axis: 'y', target: () => $('#vTrack'), fade: () => $('#viewer'), onClose: () => closeViewer() });
