@@ -18,7 +18,7 @@ async def main():
       await ctx.add_init_script(INIT); pg=await ctx.new_page()
       pg.on('pageerror',lambda e:errs.append(f'{name}: {e}'))
       await pg.goto(BASE); await pg.wait_for_selector('.empty')
-      await pg.set_input_files('#fileIn',sorted(glob.glob('samples/s*'))); await pg.wait_for_function('__sf.S.shots.length==12')
+      await pg.set_input_files('#fileIn',sorted(glob.glob('samples/s*'))); await pg.wait_for_function('__sf.S.shots.length==12'); await pg.click('.tile[data-filter=""]')
       # own tag that should match text
       await pg.evaluate("(async()=>{})()")
       assert await pg.locator('.chip.sug').count()==0  # nothing before scan
@@ -57,7 +57,7 @@ async def main():
       await pg.wait_for_timeout(500); vs=await pg.locator('#vChips .chip.sug').count(); print(name,'viewer sug chips',vs); assert vs>=1
       await pg.screenshot(path=f'shots/{PFX}v2-{name}-viewer.png'); await pg.click('#vClose')
       # persistence of dismissals + recompute on open
-      await pg.reload(); await pg.wait_for_selector('#feed .card'); await pg.wait_for_timeout(300)
+      await pg.reload(); await pg.wait_for_selector('.tile'); await pg.wait_for_timeout(300)
       ok=await pg.evaluate(f"!(__sf.S.sugg.get('{sid}')||[]).includes('{n2}') && __sf.S.sugg.size>0"); print(name,'after reload dismissal kept & recomputed',ok); assert ok
       tb=await pg.evaluate("[...document.querySelectorAll('button,.chip.sug')].filter(x=>x.offsetParent).map(x=>[x.className,x.getBoundingClientRect().height]).filter(a=>a[1]<40 && !/tagb/.test(a[0]))"); print(name,'small targets',tb[:5])
       await ctx.close()

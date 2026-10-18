@@ -30,7 +30,7 @@ const asBlobs = r => r && ({ id: r.id, full: r.full instanceof Blob ? r.full : n
 const getBlobs = id => getOne('blobs', id).then(asBlobs);
 
 /* ---------- state ---------- */
-const S = { shots: [], tags: [], filter: null, q: '', grid: false, select: false, sel: new Set(), cur: null, view: [] };
+const S = { home: true, shots: [], tags: [], filter: null, q: '', grid: false, select: false, sel: new Set(), cur: null, view: [] };
 const thumbURL = new Map();
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const tagById = id => S.tags.find(t => t.id === id);
@@ -249,9 +249,26 @@ function ncols() {
   if (!WIDE.matches) return 1;
   return w >= 900 ? 3 : 2;
 }
+function homeHTML() {
+  const latest = f => S.shots.filter(f).sort((a, b) => b.date - a.date)[0];
+  const tile = (filter, label, color, f, extra = '') => { const l = latest(f), n = S.shots.filter(f).length;
+    return `<button class="tile${extra}" data-filter="${filter}" style="--c:${color}">${l ? `<img data-id="${l.id}" alt="">` : '<div class="noimg"></div>'}<div class="tl"><span class="dot"></span><span class="tn">${label}</span><span class="tc">${n}</span></div></button>`; };
+  const sc = sugCount();
+  return `<div class="homeh"><h2>Tags</h2>${sc ? `<button class="btn sugbtn" data-act="review">✨ Review ${sc} suggestion${sc === 1 ? '' : 's'}</button>` : ''}</div><div class="tiles">` +
+    tile('', 'All screenshots', '#e9ebef', () => true) + tile('__pinned', '📌 Pinned', '#ffd479', s => s.pinned) + tile('__untagged', 'Untagged', '#6b7280', s => !s.tags.length) +
+    sortedTags().map(t => tile(t.id, (t.pinned ? '📌 ' : '') + esc(t.name), t.color, s => s.tags.includes(t.id))).join('') +
+    `<button class="tile newtile" data-act="newtag"><div class="noimg">＋</div><div class="tl"><span class="tn">New tag</span></div></button></div>`;
+}
+function setHome(on) {
+  S.home = on; $('#app').classList.toggle('home', on); $('#backBtn').hidden = on;
+  if (!on && history.state?.feed !== true) history.pushState({ feed: true }, '');
+}
+function goHome() { if (history.state?.feed) history.back(); else { setHome(true); render(); } }
 function renderFeed() {
-  const list = S.view = visible();
   const feed = $('#feed');
+  $('#app').classList.toggle('home', S.home); $('#backBtn').hidden = S.home;
+  if (S.home && S.shots.length && !S.q && !S.select) { S.view = []; feed.innerHTML = homeHTML(); lazyImgs(feed); return; }
+  const list = S.view = visible();
   $('#app').classList.toggle('selmode', S.select);
   if (!S.shots.length) {
     feed.innerHTML = `<div class="empty"><div style="font-size:42px">🖼️</div><div>No screenshots yet.</div><div style="font-size:13px;margin-top:6px">Tap Import and pick screenshots from Photos (open the Screenshots album to grab many).</div><button class="btn primary" onclick="document.getElementById('fileIn').click()">Import screenshots</button></div>`;
@@ -330,7 +347,7 @@ function sheet(html, onClick) {
   $('#sheetBox').innerHTML = html; $('#sheet').hidden = false;
   $('#sheetBox').onclick = onClick || null;
 }
-function closeSheet() { $('#sheetBox').classList.remove('big'); $('#sheet').hidden = true; $('#sheetBox').innerHTML = ''; }
+function closeSheet() { $('#sheetBox').style.cssText = ''; $('#sheet').style.cssText = ''; $('#sheetBox').classList.remove('big'); $('#sheet').hidden = true; $('#sheetBox').innerHTML = ''; }
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
 function tagSheet(ids) {
@@ -482,7 +499,7 @@ let vIdx = 0; const vURLs = new Map();
 function openViewer(id) {
   vIdx = Math.max(0, S.view.findIndex(s => s.id === id));
   $('#vTrack').innerHTML = S.view.map((s, i) => `<div class="slide" data-i="${i}"><img alt=""></div>`).join('');
-  $('#viewer').hidden = false;
+  $('#viewer').hidden = false; $('#viewer').style.cssText = '';
   const tr = $('#vTrack'); tr.scrollLeft = vIdx * tr.clientWidth;
   vLoad(); vUpdate();
 }
@@ -501,7 +518,7 @@ function vUpdate() {
   $('#vChips').innerHTML = s.tags.map(tagById).filter(Boolean).map(t => chipHTML(t, 'sm')).join('') + suggOf(s.id).map(n => sugHTML(s.id, n)).join('') || '<span style="color:var(--mut);font-size:13px">No tags · tap # to add</span>';
   if (S.cur !== s.id) { S.cur = s.id; }
 }
-function closeViewer() { $('#viewer').hidden = true; vURLs.forEach(u => URL.revokeObjectURL(u)); vURLs.clear(); $('#vTrack').innerHTML = ''; render(); }
+function closeViewer(fromPop) { $('#viewer').style.cssText = ''; $('#vTrack').style.cssText = ''; $('#viewer').hidden = true; vURLs.forEach(u => URL.revokeObjectURL(u)); vURLs.clear(); $('#vTrack').innerHTML = ''; render(); }
 let vst; $('#vTrack').addEventListener('scroll', () => { clearTimeout(vst); vst = setTimeout(() => { const tr = $('#vTrack'); const i = Math.round(tr.scrollLeft / tr.clientWidth); if (i !== vIdx) { vIdx = i; vLoad(); vUpdate(); } }, 80); });
 $('#vClose').onclick = closeViewer;
 $('#vPin').onclick = () => togglePin(S.view[vIdx].id);
@@ -512,7 +529,7 @@ document.addEventListener('keydown', e => { if ($('#viewer').hidden || e.target.
 
 /* ---------- selection ---------- */
 function updSel() { $('#selBar').hidden = !S.select; $('#selCount').textContent = `${S.sel.size} selected`; $('#selTag').disabled = $('#selDel').disabled = !S.sel.size; }
-$('#selectBtn').onclick = () => { S.select = !S.select; S.sel.clear(); render(); };
+$('#selectBtn').onclick = () => { if (S.home && !S.select) { S.filter = null; setHome(false); } S.select = !S.select; S.sel.clear(); render(); };
 $('#selDone').onclick = () => { S.select = false; S.sel.clear(); render(); };
 $('#selAll').onclick = () => { const all = S.view.every(s => S.sel.has(s.id)); S.view.forEach(s => all ? S.sel.delete(s.id) : S.sel.add(s.id)); renderFeed(); updSel(); };
 $('#selTag').onclick = () => tagSheet([...S.sel]);
@@ -524,7 +541,9 @@ $('#fileIn').onchange = async e => { const f = [...e.target.files]; e.target.val
 $('#settingsBtn').onclick = settingsSheet;
 $('#viewBtn').onclick = () => { S.grid = !S.grid; renderFeed(); $('#viewBtn').classList.toggle('on', S.grid); $('#feedWrap').scrollTop = 0; };
 $('#menuBtn').onclick = () => $('#app').classList.toggle('drawer');
-let sq; $('#search').oninput = e => { clearTimeout(sq); sq = setTimeout(() => { S.q = e.target.value; renderFeed(); }, 120); };
+let sq; $('#search').oninput = e => { clearTimeout(sq); sq = setTimeout(() => { S.q = e.target.value; if (S.q && S.home) { S.filter = null; setHome(false); } renderFeed(); }, 120); };
+$('#backBtn').onclick = goHome; $('#homeTitle').onclick = () => { if (!S.home) goHome(); };
+addEventListener('popstate', () => { if (!$('#viewer').hidden) { closeViewer(true); return; } if (!$('#sheet').hidden) closeSheet(); if (!S.home) { S.q = ''; $('#search').value = ''; S.home = true; S.select = false; S.sel.clear(); render(); } });
 function onFilterClick(e) {
   const a = e.target.closest('[data-act]')?.dataset.act;
   if (a === 'review') { $('#app').classList.remove('drawer'); return reviewSheet(); }
@@ -532,12 +551,13 @@ function onFilterClick(e) {
   if (a === 'newtag') { const n = prompt('New tag name'); if (n) createTag(n).then(renderSidebar); return; }
   const f = e.target.closest('[data-filter]'); if (!f) return;
   const v = f.dataset.filter || null;
-  S.filter = S.filter === v && v ? null : v;
+  S.filter = (S.filter === v && v && !S.home) ? null : v; setHome(false);
   $('#app').classList.remove('drawer'); renderSidebar(); renderFeed(); $('#feedWrap').scrollTop = 0;
 }
 $('#sidebar').onclick = onFilterClick; $('#chips').onclick = onFilterClick;
 document.addEventListener('click', e => { if ($('#app').classList.contains('drawer') && !e.target.closest('#sidebar,#menuBtn')) $('#app').classList.remove('drawer'); }, true);
 $('#feed').onclick = e => {
+  if (S.home) { if (e.target.closest('[data-act=review]')) return reviewSheet(); if (e.target.closest('[data-act=newtag]')) { const n = prompt('New tag name'); if (n) createTag(n).then(render); return; } const t = e.target.closest('.tile[data-filter]'); if (t) { S.filter = t.dataset.filter || null; setHome(false); renderSidebar(); renderFeed(); $('#feedWrap').scrollTop = 0; } return; }
   const card = e.target.closest('.card'); if (!card) return;
   const id = card.dataset.id;
   if (S.select) { S.sel.has(id) ? S.sel.delete(id) : S.sel.add(id); card.classList.toggle('sel'); updSel(); return; }
@@ -568,3 +588,47 @@ let rz, lastCols; addEventListener('resize', () => { clearTimeout(rz); rz = setT
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 window.__sf = { S, importFiles, render, importBackup, exportBackup };
+
+/* ---------- gestures: swipe down / left-edge swipe to dismiss ---------- */
+function dragDismiss(handle, { axis, target, fade, onClose, canStart = () => true }) {
+  let st = null;
+  handle.addEventListener('pointerdown', e => {
+    if (e.button > 0 || !canStart(e)) return;
+    st = { x: e.clientX, y: e.clientY, t: performance.now(), mode: axis === 'x' ? 'go' : null, d: 0, id: e.pointerId };
+    if (axis === 'x') { try { handle.setPointerCapture(e.pointerId); } catch {} target().style.transition = 'none'; }
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!st || e.pointerId !== st.id) return;
+    const dx = e.clientX - st.x, dy = e.clientY - st.y;
+    if (!st.mode) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (dy > 0 && dy > Math.abs(dx) * 1.2) { st.mode = 'go'; try { handle.setPointerCapture(e.pointerId); } catch {} target().style.transition = 'none'; }
+      else { st = null; return; }   // horizontal or upward: leave it to the item swiper / scrolling
+    }
+    st.d = Math.max(0, axis === 'x' ? dx : dy);
+    target().style.transform = axis === 'x' ? `translateX(${st.d}px)` : `translateY(${st.d}px) scale(${1 - Math.min(st.d, 400) / 2400})`;
+    if (fade) fade().style.backgroundColor = `rgba(0,0,0,${Math.max(0, 1 - st.d / 400) * (fade().dataset.a || 1)})`;
+    e.preventDefault();
+  }, { passive: false });
+  const end = e => {
+    if (!st || e.pointerId !== st.id) return;
+    const s = st; st = null; if (s.mode !== 'go') return;
+    const v = s.d / Math.max(1, performance.now() - s.t), el = target();
+    el.style.transition = 'transform .18s ease-out';
+    if (s.d > 110 || (v > 0.6 && s.d > 30)) {
+      el.style.transform = axis === 'x' ? 'translateX(100vw)' : 'translateY(100vh)';
+      setTimeout(onClose, 170);
+    } else {
+      el.style.transform = ''; if (fade) fade().style.backgroundColor = '';
+    }
+  };
+  handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+}
+// Viewer: vertical drag on the image track (horizontal stays the item swiper), and a left-edge strip.
+dragDismiss($('#vTrack'), { axis: 'y', target: () => $('#vTrack'), fade: () => $('#viewer'), onClose: () => closeViewer() });
+dragDismiss($('#vEdge'), { axis: 'x', target: () => $('#viewer'), onClose: () => closeViewer() });
+// Sheets: drag down on the sheet when it's scrolled to the top, left-edge strip, and the backdrop tap (above).
+dragDismiss($('#sheetBox'), { axis: 'y', target: () => $('#sheetBox'), fade: () => $('#sheet'), onClose: () => closeSheet(), canStart: e => $('#sheetBox').scrollTop <= 0 && !e.target.closest('input,textarea') });
+dragDismiss($('#sheetEdge'), { axis: 'x', target: () => $('#sheetBox'), onClose: () => closeSheet() });
+// Feed: left-edge swipe goes back to Tags.
+dragDismiss($('#edge'), { axis: 'x', target: () => $('#feed'), canStart: () => !S.home, onClose: () => { $('#feed').style.cssText = ''; goHome(); } });

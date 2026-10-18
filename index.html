@@ -17,8 +17,9 @@
 <body>
 <div id="app">
   <header id="top">
+    <button id="backBtn" class="ib" aria-label="Back to tags" hidden>‹</button>
     <button id="menuBtn" class="ib narrow-only" aria-label="Tags">☰</button>
-    <h1>Snapfeed</h1>
+    <h1 id="homeTitle">Snapfeed</h1>
     <div id="searchWrap"><input id="search" type="search" placeholder="Search" autocomplete="off"></div>
     <button id="viewBtn" class="ib" aria-label="Toggle grid">▦</button>
     <button id="selectBtn" class="ib" aria-label="Select">☑</button>
@@ -29,7 +30,7 @@
   <div id="chips"></div>
   <div id="main">
     <aside id="sidebar"></aside>
-    <section id="feedWrap"><div id="status"></div><div id="feed"></div></section>
+    <section id="feedWrap"><div id="edge" aria-hidden="true"></div><div id="status"></div><div id="feed"></div></section>
     <aside id="detail"></aside>
   </div>
   <div id="selBar" hidden>
@@ -41,11 +42,12 @@
   </div>
 </div>
 <div id="viewer" hidden>
+  <div id="vEdge" class="edgezone" aria-hidden="true"></div>
   <div id="vTop"><button id="vClose" class="ib" aria-label="Close">✕</button><span id="vDate"></span><span class="sp"></span><button id="vPin" class="ib" aria-label="Pin">📌</button><button id="vTag" class="ib" aria-label="Tags">#</button><button id="vDel" class="ib" aria-label="Delete">🗑</button></div>
   <div id="vTrack"></div>
   <div id="vBottom"><div id="vChips" class="chiprow"></div><input id="vCap" placeholder="Add a caption"></div>
 </div>
-<div id="sheet" hidden><div id="sheetBox"></div></div>
+<div id="sheet" hidden><div id="sheetEdge" class="edgezone" aria-hidden="true"></div><div id="sheetBox"></div></div>
 <div id="toast" hidden></div>
 <script src="vendor/jszip.min.js" defer></script>
 <script src="app.js" defer></script>
