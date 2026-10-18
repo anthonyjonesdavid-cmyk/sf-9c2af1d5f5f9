@@ -117,7 +117,7 @@ async function importFiles(files, opts = {}) {
         id: meta.id || uid(), hash, w, h, type: blob.type, name: f.name || '',
         date: meta.date || ex || (f.lastModified && f.lastModified < now - 2000 ? f.lastModified : null) || now,
         dateSrc: meta.dateSrc || (ex ? 'exif' : f.lastModified && f.lastModified < now - 2000 ? 'file' : 'import'),
-        added: meta.added || now, caption: meta.caption || '', tags: meta.tags || [], pinned: !!meta.pinned, ocr: meta.ocr ?? null
+        added: meta.added || now, caption: meta.caption || '', tags: meta.tags || [], pinned: !!meta.pinned, ocr: meta.ocr ?? null, dismissed: meta.dismissed || []
       };
       await tx(['shots', 'blobs'], 'readwrite', (a, b) => { a.put(shot); b.put({ id: shot.id, full: buf, ftype: blob.type, thumb: tbuf }); });
       hashes.add(hash); S.shots.push(shot); added++;
@@ -159,6 +159,75 @@ async function fullURL(id) { const b = await getBlobs(id); return b ? URL.create
 function sortedTags() { return [...S.tags].sort((a, b) => (b.pinned - a.pinned) || a.name.localeCompare(b.name)); }
 const chipHTML = (t, cls = '') => `<span class="chip ${cls}" data-tag="${t.id}"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`;
 
+
+/* ---------- smart tag suggestions (on-device keyword rules) ---------- */
+const RULES = [
+  ['Receipts', [/\b(sub)?total\b/i, /\border\s*(#|no\.?|number)/i, /\breceipt\b/i, /\btax\b/i, /\$\s?\d+[.,]\d\d/, /\bqty\b/i, /\bpurchase/i], 2],
+  ['Shipping', [/\btracking\b/i, /\bUPS\b/, /\bUSPS\b/i, /\bfed\s?ex\b/i, /\bDHL\b/, /\bdelivered\b/i, /\bshipped\b/i, /\bout for delivery\b/i, /\b1Z[0-9A-Z]{8,}/, /\bpackage\b/i], 1],
+  ['Recipes', [/\bcups?\b/i, /\btbsp\b/i, /\btsp\b/i, /\bpreheat\b/i, /\bingredients?\b/i, /\brecipe\b/i, /\boven\b/i, /\b\d+\s?(oz|lb|g)\b/i, /\bbake\b/i], 2],
+  ['Travel', [/\bflight\b/i, /\bgate\b/i, /\bboarding\b/i, /\bconfirmation\b/i, /\bdepart(s|ure)?\b/i, /\bterminal\b/i, /\bseat\b/i, /\bhotel\b/i, /\bcheck-?in\b/i, /\b[A-Z]{3}\s?(to|→|-)\s?[A-Z]{3}\b/], 2],
+  ['Messages', [/\bimessage\b/i, /\btext message\b/i, /\bread \d/i, /\btyping\b/i, /\btoday \d{1,2}:\d\d/i, /\byesterday\b/i, /\blol\b/i, /\bsee you\b/i, /\bdinner\b/i, /\?\s*$/m], 2],
+  ['Maps', [/\bdirections?\b/i, /\b\d+(\.\d)?\s?mi\b/i, /\baddress\b/i, /\broute\b/i, /\b(st|ave|rd|blvd|hwy)\b\.?/i, /\b\d+\s?min drive\b/i, /\bpark\b/i, /\bnavigat/i], 2],
+  ['Codes', [/\bverification code\b/i, /\bOTP\b/, /\bpasscode\b/i, /\bpassword\b/i, /\bone-time\b/i, /\bcode is\b/i, /\bwi-?fi\b/i, /\bPIN\b/], 1],
+  ['Social', [/\blikes?\b/i, /\bretweets?\b/i, /\breposts?\b/i, /\bfollowers?\b/i, /\bfollow\b/i, /(^|\s)@\w{2,}/, /\bcomments?\b/i, /\bviews\b/i], 2],
+  ['Money', [/\bbalance\b/i, /\bpayment\b/i, /\bdeposit\b/i, /\btransfer\b/i, /\bvenmo\b/i, /\bzelle\b/i, /\bavailable\b/i, /\bstatement\b/i, /\bchecking\b/i], 2],
+];
+const wordRe = n => new RegExp('(^|[^a-z0-9])' + n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/s$/, '') + 's?($|[^a-z0-9])', 'i');
+function suggestFor(s) {
+  const text = s.ocr; if (!text) return [];
+  const have = new Set(s.tags.map(t => tagById(t)?.name.toLowerCase()).filter(Boolean));
+  const dis = new Set((s.dismissed || []).map(x => x.toLowerCase()));
+  const out = [];
+  const add = n => { const k = n.toLowerCase(); if (!have.has(k) && !dis.has(k) && !out.some(o => o.toLowerCase() === k)) out.push(n); };
+  for (const t of S.tags) if (t.name.length >= 3 && wordRe(t.name).test(text)) add(t.name);
+  const tall = s.h / s.w > 1.7; // phone-shaped screenshot: chat layouts are almost always this
+  for (const [name, res, need] of RULES) {
+    let hits = res.filter(r => r.test(text)).length;
+    if (name === 'Messages' && tall && text.split('\n').filter(l => l.trim().length && l.trim().length < 28).length >= 6) hits++;
+    if (hits >= need) add(S.tags.find(t => t.name.toLowerCase() === name.toLowerCase())?.name || name);
+  }
+  return out;
+}
+function suggestAll() { S.sugg = new Map(); for (const s of S.shots) { const g = suggestFor(s); if (g.length) S.sugg.set(s.id, g); } }
+const suggOf = id => S.sugg?.get(id) || [];
+const sugCount = () => [...(S.sugg || new Map()).values()].reduce((a, b) => a + b.length, 0);
+const sugHTML = (id, n) => `<span class="chip sm sug" data-sid="${id}" data-sug="${esc(n)}" role="button" aria-label="Accept suggested tag ${esc(n)}">＋ ${esc(n)}<button class="sx" data-x aria-label="Dismiss suggestion">×</button></span>`;
+async function acceptSug(ids, name) {
+  const t = await createTag(name);
+  await setTagOn(ids, t.id, true);
+}
+async function dismissSug(ids, name) {
+  const ch = S.shots.filter(s => ids.includes(s.id));
+  ch.forEach(s => { s.dismissed = [...new Set([...(s.dismissed || []), name.toLowerCase()])]; });
+  await tx('shots', 'readwrite', st => ch.forEach(s => st.put(s)));
+}
+async function afterSug() { suggestAll(); render(); if (!$('#viewer').hidden) vUpdate(); if (!$('#sheet').hidden && $('#sheetBox .review')) reviewSheet(); }
+document.addEventListener('click', async e => {
+  const c = e.target.closest('.chip.sug'); if (!c || S.select) return;
+  e.stopPropagation(); e.preventDefault();
+  const id = c.dataset.sid, n = c.dataset.sug;
+  if (e.target.closest('[data-x]')) { await dismissSug([id], n); toast(`Won't suggest ${n} for this one`); }
+  else { await acceptSug([id], n); toast(`Tagged ${n}`); }
+  afterSug();
+}, true);
+function reviewSheet() {
+  const groups = new Map();
+  for (const [id, names] of S.sugg) for (const n of names) (groups.get(n) || groups.set(n, []).get(n)).push(id);
+  const exists = n => S.tags.some(t => t.name.toLowerCase() === n.toLowerCase());
+  const body = [...groups].sort((a, b) => b[1].length - a[1].length).map(([n, ids]) => `<div class="rg"><div class="rgh"><b>${esc(n)}</b><span class="mut">${ids.length}${exists(n) ? '' : ' · new tag'}</span><span class="sp"></span><button class="btn" data-ra="dismissall" data-n="${esc(n)}">Dismiss all</button><button class="btn primary" data-ra="acceptall" data-n="${esc(n)}">Accept all</button></div>
+    <div class="rgrid">${ids.map(id => `<div class="ri"><img data-id="${id}" alt=""><div class="rib"><button class="ib" data-ra="no" data-n="${esc(n)}" data-id="${id}" aria-label="Dismiss">✕</button><button class="ib ok" data-ra="yes" data-n="${esc(n)}" data-id="${id}" aria-label="Accept">✓</button></div></div>`).join('')}</div></div>`).join('');
+  sheet(`<div class="review"><h2>Review suggestions<button class="ib" data-act="close">✕</button></h2>
+    <p class="mut" style="margin:0 0 8px;font-size:13px">Suggested from each screenshot's recognised text, on this device. Nothing is tagged until you accept.</p>
+    ${body || '<div class="empty" style="padding:30px">No suggestions right now. Run Scan text in Settings to find more.</div>'}</div>`, async e => {
+    const b = e.target.closest('[data-ra],[data-act]'); if (!b) return;
+    if (b.dataset.act === 'close') return closeSheet();
+    const n = b.dataset.n, ids = b.dataset.id ? [b.dataset.id] : groups.get(n);
+    if (b.dataset.ra === 'yes' || b.dataset.ra === 'acceptall') await acceptSug(ids, n); else await dismissSug(ids, n);
+    afterSug();
+  });
+  $('#sheetBox').classList.add('big'); lazyImgs($('#sheetBox'));
+}
+
 /* ---------- render ---------- */
 let io;
 function lazyImgs(root) {
@@ -173,7 +242,7 @@ function cardHTML(s) {
     ${s.pinned ? '<span class="pinb">📌</span>' : ''}
     <div class="meta"><div class="d">${fmtDate(s.date)}</div>
     ${s.caption ? `<div class="cap">${esc(s.caption)}</div>` : ''}
-    <div class="chiprow">${tags.map(t => chipHTML(t, 'sm')).join('')}<button class="tagb" data-act="tag" aria-label="Edit tags">＋#</button></div></div></div>`;
+    <div class="chiprow">${tags.map(t => chipHTML(t, 'sm')).join('')}${suggOf(s.id).map(n => sugHTML(s.id, n)).join('')}<button class="tagb" data-act="tag" aria-label="Edit tags">＋#</button></div></div></div>`;
 }
 function ncols() {
   const w = $('#feedWrap').clientWidth;
@@ -206,10 +275,11 @@ function renderSidebar() {
   $('#sidebar').innerHTML = row(null, '🖼️ All screenshots', S.shots.length) +
     row('__pinned', '📌 Pinned', S.shots.filter(s => s.pinned).length) +
     row('__untagged', '◌ Untagged', S.shots.filter(s => !s.tags.length).length) +
+    (sugCount() ? `<button class="srow sugrow" data-act="review"><span>✨ Review suggestions</span><span class="n">${sugCount()}</span></button>` : '') +
     `<div class="side-h"><span>Tags</span><button class="btn" data-act="manage">Edit</button></div>` +
     sortedTags().map(t => row(t.id, (t.pinned ? '📌 ' : '') + esc(t.name), count(t.id), t.color)).join('') +
     `<button class="srow" data-act="newtag" style="color:var(--acc)">＋ New tag</button>`;
-  $('#chips').innerHTML = (S.tags.length ? `<span class="chip${!S.filter ? ' on' : ''}" data-filter="">All</span><span class="chip${S.filter === '__pinned' ? ' on' : ''}" data-filter="__pinned">📌 Pinned</span>` + sortedTags().map(t => chipHTML(t, S.filter === t.id ? 'on' : '').replace('data-tag', 'data-filter')).join('') : '');
+  $('#chips').innerHTML = (sugCount() ? `<span class="chip sugrow" data-act="review">✨ ${sugCount()} suggested</span>` : '') + (S.tags.length ? `<span class="chip${!S.filter ? ' on' : ''}" data-filter="">All</span><span class="chip${S.filter === '__pinned' ? ' on' : ''}" data-filter="__pinned">📌 Pinned</span>` + sortedTags().map(t => chipHTML(t, S.filter === t.id ? 'on' : '').replace('data-tag', 'data-filter')).join('') : '');
 }
 async function renderDetail() {
   const el = $('#detail');
@@ -220,7 +290,7 @@ async function renderDetail() {
   el.innerHTML = `<img id="dImg" alt="">
    <div class="row"><button class="btn" data-act="open">Open</button><button class="btn" data-act="tag">Tags</button><button class="btn" data-act="pin">${s.pinned ? 'Unpin' : 'Pin'}</button><button class="btn danger" data-act="del">Delete</button></div>
    <div class="card-d" style="color:var(--mut);font-size:13px">${fmtDate(s.date)} <span style="opacity:.7">(${{ exif: 'from photo data', file: 'file date', import: 'import time' }[s.dateSrc] || ''})</span></div>
-   <div class="chiprow" style="margin:8px 0">${tags.map(t => chipHTML(t, 'sm')).join('') || '<span style="color:var(--mut);font-size:13px">No tags</span>'}</div>
+   <div class="chiprow" style="margin:8px 0">${tags.map(t => chipHTML(t, 'sm')).join('') || (suggOf(s.id).length ? '' : '<span style="color:var(--mut);font-size:13px">No tags</span>')}${suggOf(s.id).map(n => sugHTML(s.id, n)).join('')}</div>
    <textarea id="dCap" placeholder="Add a caption">${esc(s.caption)}</textarea>
    ${s.ocr ? `<div style="color:var(--mut);font-size:12px;margin-top:10px">Recognised text</div><div class="ocr">${esc(s.ocr)}</div>` : ''}`;
   const id = s.id;
@@ -228,7 +298,7 @@ async function renderDetail() {
   fullURL(id).then(u => { const im = $('#dImg'); if (im && S.cur === id) { im.onload = () => {}; im.src = u; } });
   $('#dCap').onchange = e => setCaption(id, e.target.value);
 }
-function render() { renderSidebar(); renderFeed(); renderDetail(); updSel(); $('#viewBtn').classList.toggle('on', S.grid); $('#selectBtn').classList.toggle('on', S.select); }
+function render() { if (S.sugg) suggestAll(); renderSidebar(); renderFeed(); renderDetail(); updSel(); $('#viewBtn').classList.toggle('on', S.grid); $('#selectBtn').classList.toggle('on', S.select); }
 function status(t) { $('#status').textContent = t; }
 let tt; function toast(t) { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(tt); tt = setTimeout(() => e.hidden = true, 2600); }
 
@@ -260,7 +330,7 @@ function sheet(html, onClick) {
   $('#sheetBox').innerHTML = html; $('#sheet').hidden = false;
   $('#sheetBox').onclick = onClick || null;
 }
-function closeSheet() { $('#sheet').hidden = true; $('#sheetBox').innerHTML = ''; }
+function closeSheet() { $('#sheetBox').classList.remove('big'); $('#sheet').hidden = true; $('#sheetBox').innerHTML = ''; }
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
 function tagSheet(ids) {
@@ -314,7 +384,7 @@ async function settingsSheet() {
   sheet(`<h2>Settings<button class="ib" data-act="close">✕</button></h2>
     <div class="set-sec"><b>Scan text</b><p>Reads the text in your screenshots on this device so search can find it. ${unscanned} of ${S.shots.length} not scanned yet. The first scan downloads the text reader (about 10 MB).</p>
       <button class="btn primary" data-act="scan" ${unscanned ? '' : 'disabled'}>Scan ${unscanned} screenshot${unscanned === 1 ? '' : 's'}</button> <button class="btn" data-act="rescan" ${S.shots.length ? '' : 'disabled'}>Rescan all</button>
-      <div class="prog" id="scanProg" hidden><i></i></div><p id="scanTxt"></p></div>
+      <div class="prog" id="scanProg" hidden><i></i></div><p id="scanTxt"></p><button class="btn" data-act="review">Review tag suggestions (${sugCount()})</button></div>
     <div class="set-sec"><b>Backup</b><p>A zip with every screenshot plus your tags, captions and dates.</p>
       <button class="btn" data-act="export" ${S.shots.length ? '' : 'disabled'}>Export backup</button> <button class="btn" data-act="restore">Import backup</button><input type="file" id="zipIn" accept=".zip,application/zip" hidden><p id="bkTxt"></p></div>
     <div class="set-sec"><b>Storage</b><p>${S.shots.length} screenshots, ${S.tags.length} tags. ${est ? `Using ${mb(est.usage || 0)}${est.quota ? ` of about ${mb(est.quota)} available` : ''}.` : ''}</p></div>
@@ -322,6 +392,7 @@ async function settingsSheet() {
     <div class="set-sec"><p style="font-size:12px">Snapfeed prototype · your screenshots stay on this device.</p></div>`, async e => {
     const a = e.target.closest('[data-act]')?.dataset.act;
     if (a === 'close') closeSheet();
+    else if (a === 'review') reviewSheet();
     else if (a === 'scan' || a === 'rescan') runScan(a === 'rescan');
     else if (a === 'export') exportBackup();
     else if (a === 'restore') $('#zipIn').click();
@@ -359,7 +430,7 @@ async function runScan(all) {
       todo[i].ocr = text.replace(/[ \t]+/g, ' ').replace(/\n{2,}/g, '\n').trim(); await saveShot(todo[i]);
     }
     await rec.terminate();
-    upd(todo.length, `Done. Scanned ${todo.length}.`); toast(`Scanned ${todo.length} screenshot${todo.length === 1 ? '' : 's'}`);
+    suggestAll(); render(); upd(todo.length, `Done. Scanned ${todo.length}. ${sugCount()} tag suggestion${sugCount() === 1 ? '' : 's'} to review.`); toast(`Scanned ${todo.length} screenshot${todo.length === 1 ? '' : 's'}`);
   } catch (e) { console.error(e); upd(0, 'Scan stopped: ' + e.message); }
   scanning = false; setTimeout(() => status(''), 1500); renderDetail();
 }
@@ -427,7 +498,7 @@ function vUpdate() {
   const s = S.view[vIdx]; if (!s) return closeViewer();
   $('#vDate').textContent = `${fmtDate(s.date)} · ${vIdx + 1}/${S.view.length}`;
   $('#vCap').value = s.caption; $('#vPin').classList.toggle('on', s.pinned);
-  $('#vChips').innerHTML = s.tags.map(tagById).filter(Boolean).map(t => chipHTML(t, 'sm')).join('') || '<span style="color:var(--mut);font-size:13px">No tags · tap # to add</span>';
+  $('#vChips').innerHTML = s.tags.map(tagById).filter(Boolean).map(t => chipHTML(t, 'sm')).join('') + suggOf(s.id).map(n => sugHTML(s.id, n)).join('') || '<span style="color:var(--mut);font-size:13px">No tags · tap # to add</span>';
   if (S.cur !== s.id) { S.cur = s.id; }
 }
 function closeViewer() { $('#viewer').hidden = true; vURLs.forEach(u => URL.revokeObjectURL(u)); vURLs.clear(); $('#vTrack').innerHTML = ''; render(); }
@@ -456,6 +527,7 @@ $('#menuBtn').onclick = () => $('#app').classList.toggle('drawer');
 let sq; $('#search').oninput = e => { clearTimeout(sq); sq = setTimeout(() => { S.q = e.target.value; renderFeed(); }, 120); };
 function onFilterClick(e) {
   const a = e.target.closest('[data-act]')?.dataset.act;
+  if (a === 'review') { $('#app').classList.remove('drawer'); return reviewSheet(); }
   if (a === 'manage') { $('#app').classList.remove('drawer'); return manageTags(); }
   if (a === 'newtag') { const n = prompt('New tag name'); if (n) createTag(n).then(renderSidebar); return; }
   const f = e.target.closest('[data-filter]'); if (!f) return;
@@ -488,6 +560,7 @@ let rz, lastCols; addEventListener('resize', () => { clearTimeout(rz); rz = setT
 /* ---------- boot ---------- */
 (async function boot() {
   [S.shots, S.tags] = await Promise.all([getAll('shots'), getAll('tags')]);
+  suggestAll();
   lastCols = ncols() + '' + WIDE.matches;
   render();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});

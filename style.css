@@ -106,3 +106,20 @@ input{font:inherit;color:var(--tx)}
 .prog i{display:block;height:100%;background:var(--acc);width:0}
 #toast{position:fixed;left:50%;bottom:calc(var(--sb) + 70px);transform:translateX(-50%);background:#2a2f39;padding:10px 16px;border-radius:12px;z-index:50;font-size:14px;max-width:90vw}
 #toast[hidden]{display:none}
+
+.chip.sug{border-style:dashed;border-color:#5b6475;color:#c9d1dd;background:transparent;min-height:42px;padding:0 0 0 12px;gap:2px}
+.chip.sug .sx{min-width:40px;height:40px;border:0;background:transparent;color:var(--mut);font-size:18px;cursor:pointer;border-radius:0 20px 20px 0}
+.chip.sug .sx:active{background:#2a2f39}
+.chip.sug:active{background:#20263a}
+.srow.sugrow,.chip.sugrow{color:#ffd479}
+.mut{color:var(--mut)}
+#sheetBox.big{width:min(900px,100%)}
+.rg{border-top:1px solid var(--line);padding:10px 0}
+.rgh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.rgh .mut{font-size:13px}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.ri{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ri img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;object-position:top;background:#111}
+.rib{display:flex}
+.rib .ib{flex:1;border-radius:0}
+.rib .ok{color:#7ee787}
