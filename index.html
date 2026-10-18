@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e0f12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Snapfeed">
+<meta name="robots" content="noindex,nofollow">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+<title>Snapfeed</title>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <button id="menuBtn" class="ib narrow-only" aria-label="Tags">☰</button>
+    <h1>Snapfeed</h1>
+    <div id="searchWrap"><input id="search" type="search" placeholder="Search" autocomplete="off"></div>
+    <button id="viewBtn" class="ib" aria-label="Toggle grid">▦</button>
+    <button id="selectBtn" class="ib" aria-label="Select">☑</button>
+    <button id="importBtn" class="btn primary" aria-label="Import screenshots">＋<span class="wide-lbl"> Import</span></button>
+    <button id="settingsBtn" class="ib" aria-label="Settings">⚙</button>
+    <input id="fileIn" type="file" accept="image/*" multiple hidden>
+  </header>
+  <div id="chips"></div>
+  <div id="main">
+    <aside id="sidebar"></aside>
+    <section id="feedWrap"><div id="status"></div><div id="feed"></div></section>
+    <aside id="detail"></aside>
+  </div>
+  <div id="selBar" hidden>
+    <span id="selCount">0 selected</span>
+    <button id="selAll" class="btn">All</button>
+    <button id="selTag" class="btn">Tag</button>
+    <button id="selDel" class="btn danger">Delete</button>
+    <button id="selDone" class="btn primary">Done</button>
+  </div>
+</div>
+<div id="viewer" hidden>
+  <div id="vTop"><button id="vClose" class="ib" aria-label="Close">✕</button><span id="vDate"></span><span class="sp"></span><button id="vPin" class="ib" aria-label="Pin">📌</button><button id="vTag" class="ib" aria-label="Tags">#</button><button id="vDel" class="ib" aria-label="Delete">🗑</button></div>
+  <div id="vTrack"></div>
+  <div id="vBottom"><div id="vChips" class="chiprow"></div><input id="vCap" placeholder="Add a caption"></div>
+</div>
+<div id="sheet" hidden><div id="sheetBox"></div></div>
+<div id="toast" hidden></div>
+<script src="vendor/jszip.min.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
