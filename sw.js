@@ -1,7 +1,7 @@
-const CACHE = 'snapfeed-20261018134151';
+const CACHE = 'snapfeed-20261026134612';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'vendor/jszip.min.js', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
+self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('snapfeed-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 function idbInbox(files) {
   return new Promise((res, rej) => {
     const r = indexedDB.open('snapfeed', 1);
